@@ -18,25 +18,33 @@ def diagnose(record: Dict[str, Any], anomaly_result: Dict[str, Any] | None = Non
     issues: List[str] = []
     causes: List[str] = []
     actions: List[str] = []
+    evidence: List[str] = []
     severity = "normal"
 
     if latency > 100:
         issues.append("Severe latency detected")
+        evidence.append(f"Idle latency is high at {latency:.2f} ms.")
         severity = "high"
     elif latency > 50:
         issues.append("High latency detected")
+        evidence.append(f"Idle latency is elevated at {latency:.2f} ms.")
         severity = "medium"
 
     if packet_loss >= 3:
         issues.append("Significant packet loss detected")
+        evidence.append(f"Packet loss is high at {packet_loss:.2f}%.")
         severity = "high"
     elif packet_loss > 0:
         issues.append("Packet loss detected")
+        evidence.append(f"Packet loss is present at {packet_loss:.2f}%.")
         if severity == "normal":
             severity = "medium"
+    else:
+        evidence.append("Packet loss is 0%, indicating stable basic connectivity.")
 
     if signal < 50 or rssi < -75:
         issues.append("Very weak signal")
+        evidence.append(f"Wi-Fi signal is weak: {signal}% / {rssi} dBm.")
         causes.append("Distance from AP or heavy obstruction")
         actions.extend([
             "Move closer to the access point.",
@@ -45,13 +53,17 @@ def diagnose(record: Dict[str, Any], anomaly_result: Dict[str, Any] | None = Non
         severity = "high"
     elif signal < 70 or rssi < -67:
         issues.append("Weak signal")
+        evidence.append(f"Wi-Fi signal is below ideal range: {signal}% / {rssi} dBm.")
         causes.append("Signal attenuation or partial obstruction")
         actions.append("Reposition closer to the access point.")
         if severity == "normal":
             severity = "medium"
+    else:
+        evidence.append(f"Wi-Fi signal is healthy: {signal}% / {rssi} dBm.")
 
     if download < 100:
         issues.append("Severe throughput degradation")
+        evidence.append(f"Download throughput is low at {download:.2f} Mbps.")
         causes.append("Possible congestion, interference, or poor link quality")
         actions.extend([
             "Run comparison tests at off-peak hours.",
@@ -60,17 +72,23 @@ def diagnose(record: Dict[str, Any], anomaly_result: Dict[str, Any] | None = Non
         severity = "high"
     elif download < 200:
         issues.append("Below expected throughput")
+        evidence.append(f"Download throughput is below expected range at {download:.2f} Mbps.")
         causes.append("Possible congestion or band/channel contention")
         actions.append("Retry the test in another location or time window.")
         if severity == "normal":
             severity = "medium"
+    else:
+        evidence.append(f"Download throughput is healthy at {download:.2f} Mbps.")
 
     if jitter > 20:
         issues.append("Unstable connection")
+        evidence.append(f"Jitter is elevated at {jitter:.2f} ms.")
         causes.append("Interference or inconsistent link quality")
         actions.append("Check for crowded or noisy wireless environments.")
         if severity == "normal":
             severity = "medium"
+    else:
+        evidence.append(f"Jitter is within acceptable range at {jitter:.2f} ms.")
 
     if band == "2.4 GHz":
         causes.append("2.4 GHz may experience heavier interference in dense environments")
@@ -101,6 +119,7 @@ def diagnose(record: Dict[str, Any], anomaly_result: Dict[str, Any] | None = Non
         "severity": severity,
         "priority": priority,
         "health_score": health_score,
+        "evidence": evidence,
     }
 
 

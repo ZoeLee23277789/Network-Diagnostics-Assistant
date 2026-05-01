@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import { Activity, AlertTriangle, Gauge, ShieldCheck } from 'lucide-react'
+import { Activity, AlertTriangle, Brain, Gauge, ShieldCheck } from 'lucide-react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -32,47 +32,177 @@ function avg(items, path) {
   return values.reduce((a, b) => a + b, 0) / values.length
 }
 
+function fmt(value, suffix = '', digits = 2) {
+  if (value === undefined || value === null || value === '') return '-'
+  if (typeof value === 'number') {
+    const shown = Number.isInteger(value) ? value.toFixed(0) : value.toFixed(digits)
+    return `${shown}${suffix}`
+  }
+  return `${value}${suffix}`
+}
+
+function MetricItem({ label, value }) {
+  return (
+    <div className="detail-item">
+      <div className="kv-label">{label}</div>
+      <div className="kv-value">{value}</div>
+    </div>
+  )
+}
+
+function DetailSection({ title, children }) {
+  return (
+    <div className="card compact-card">
+      <h3 className="section-title">{title}</h3>
+      <div className="detail-grid">{children}</div>
+    </div>
+  )
+}
+
+function renderCustomerExplanation(explanation) {
+  if (!explanation) return <div>-</div>
+  if (typeof explanation === 'string') return <div className="small-text">{explanation}</div>
+
+  return (
+    <div className="note-block">
+      <div className="note-line">
+        <strong>Status:</strong> {explanation.status || '-'}
+      </div>
+
+      {explanation.key_findings && explanation.key_findings.length > 0 && (
+        <>
+          <div className="metric-label note-heading">Key Findings</div>
+          <ul className="bullet-list">
+            {explanation.key_findings.map((finding, idx) => (
+              <li key={idx}>{finding}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <p className="small-text">{explanation.message || '-'}</p>
+
+      {explanation.next_steps && explanation.next_steps.length > 0 && (
+        <>
+          <div className="metric-label note-heading">Recommended Next Steps</div>
+          <ul className="bullet-list">
+            {explanation.next_steps.map((step, idx) => (
+              <li key={idx}>{step}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+function renderEngineerNote(note) {
+  if (!note) return <div>-</div>
+  if (typeof note === 'string') return <div className="small-text">{note}</div>
+
+  return (
+    <div className="note-block">
+      <div className="note-line">
+        <strong>Status:</strong> {note.status || '-'}
+      </div>
+      <div className="note-line">
+        <strong>Severity:</strong> {note.severity || '-'}
+      </div>
+      <div className="note-line">
+        <strong>Root Cause Analysis:</strong>
+      </div>
+      <div className="small-text" style={{ marginBottom: 12 }}>{note.root_cause || '-'}</div>
+
+      <div className="metric-label note-heading">Key Technical Observations</div>
+      <ul className="bullet-list">
+        {(note.key_observations || []).length ? (
+          note.key_observations.map((item, idx) => <li key={idx}>{item}</li>)
+        ) : (
+          <li>No observations provided.</li>
+        )}
+      </ul>
+
+      <div className="metric-label note-heading">Detailed Diagnosis</div>
+      <div className="small-text">{note.diagnosis || '-'}</div>
+
+      <div className="metric-label note-heading">Recommended Technical Actions</div>
+      <ul className="bullet-list">
+        {(note.recommended_next_steps || []).length ? (
+          note.recommended_next_steps.map((item, idx) => <li key={idx}>{item}</li>)
+        ) : (
+          <li>No next steps provided.</li>
+        )}
+      </ul>
+
+      <div className="metric-label note-heading">Data Collection for Future Issues</div>
+      <ul className="bullet-list">
+        {(note.data_to_collect_if_issue_repeats || []).length ? (
+          note.data_to_collect_if_issue_repeats.map((item, idx) => <li key={idx}>{item}</li>)
+        ) : (
+          <li>AP/router logs, nearby AP scan, channel utilization, and repeat measurements.</li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+function RawLogs({ selected }) {
+  const raw = selected?.raw_outputs || {}
+  const keys = [
+    ['speedtest_raw', 'Speedtest Raw Output'],
+    ['wifi_raw', 'Wi-Fi Raw Output'],
+    ['ping_raw', 'Ping Raw Output'],
+    ['tracert_raw', 'Traceroute Raw Output'],
+    ['nslookup_raw', 'DNS Raw Output'],
+  ]
+
+  return (
+    <div className="card">
+      <div className="metric-label">Raw Diagnostics</div>
+      <div className="small-text" style={{ marginBottom: 8 }}>
+        Hidden by default for a clean FAE dashboard. Open only when engineering traceability is needed.
+      </div>
+      {keys.map(([key, label]) => (
+        <details key={key} className="raw-details">
+          <summary>{label}</summary>
+          <pre className="raw-pre">{raw[key] || 'No raw output available.'}</pre>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 export default function App() {
   const [records, setRecords] = useState([])
-  const [summary, setSummary] = useState(null)
   const [locations, setLocations] = useState([])
   const [locationFilter, setLocationFilter] = useState('all')
   const [severityFilter, setSeverityFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(null)
+  const [mainView, setMainView] = useState('overview')
+  const [rightbarTab, setRightbarTab] = useState('ai')
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState('')
 
   useEffect(() => {
     loadData()
-
-    // Auto-refresh every 5 minutes
-    const refreshInterval = setInterval(() => {
-      console.log('[AutoRefresh] Fetching latest data...')
-      loadData()
-    }, 300000)
-
+    const refreshInterval = setInterval(loadData, 300000)
     return () => clearInterval(refreshInterval)
   }, [])
 
   async function loadData() {
-    const [recordsRes, summaryRes, locationsRes] = await Promise.all([
-      axios.get('/api/records?limit=30'),
-      axios.get('/api/summary'),
+    const [recordsRes, locationsRes] = await Promise.all([
+      axios.get('/api/records?limit=50'),
       axios.get('/api/locations'),
     ])
-
     setRecords(recordsRes.data)
-    setSummary(summaryRes.data)
     setLocations(locationsRes.data)
   }
 
   const filtered = useMemo(() => {
-    const now = Date.now()
-    const cutoff = now - 24 * 60 * 60 * 1000 // 最近24小時
-
     return records.filter((r) => {
-      const recordTime = new Date(r.timestamp).getTime()
-      const recentOk = !Number.isNaN(recordTime) && recordTime >= cutoff
-
       const locationOk = locationFilter === 'all' || r.location === locationFilter
       const severityOk = severityFilter === 'all' || r.rule_diagnosis?.severity === severityFilter
 
@@ -83,12 +213,14 @@ export default function App() {
           r.location,
           r.environment,
           r.wifi?.ssid,
+          r.wifi?.band,
+          r.wifi?.radio_type,
           r.root_cause?.root_cause_category,
         ]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(q))
 
-      return recentOk && locationOk && severityOk && queryOk
+      return locationOk && severityOk && queryOk
     })
   }, [records, locationFilter, severityFilter, query])
 
@@ -97,11 +229,8 @@ export default function App() {
       setSelected(null)
       return
     }
-
     const stillExists = selected && filtered.find((r) => r.timestamp === selected.timestamp)
-    if (!stillExists) {
-      setSelected(filtered[0])
-    }
+    if (!stillExists) setSelected(filtered[0])
   }, [filtered, selected])
 
   const chartData = useMemo(
@@ -132,38 +261,75 @@ export default function App() {
   const stats = useMemo(
     () => ({
       avgDownload: avg(filtered, (r) => r.speedtest?.download_mbps).toFixed(1),
+      avgUpload: avg(filtered, (r) => r.speedtest?.upload_mbps).toFixed(1),
       avgLatency: avg(filtered, (r) => r.speedtest?.latency_ms).toFixed(1),
+      avgJitter: avg(filtered, (r) => r.speedtest?.jitter_ms).toFixed(1),
+      avgPacketLoss: avg(filtered, (r) => r.speedtest?.packet_loss).toFixed(1),
       avgSignal: avg(filtered, (r) => r.wifi?.signal_percent).toFixed(0),
+      avgRssi: avg(filtered, (r) => r.wifi?.rssi_dbm).toFixed(0),
       avgHealth: avg(filtered, (r) => r.rule_diagnosis?.health_score).toFixed(0),
     }),
     [filtered]
   )
 
+  const evidence = useMemo(() => {
+    if (!selected) return []
+    return [
+      ...(selected.rule_diagnosis?.evidence || []),
+      ...(selected.root_cause?.evidence || []),
+    ].slice(0, 8)
+  }, [selected])
+
+  useEffect(() => {
+    if (!selected) return
+    setRightbarTab('ai')
+    setChatMessages([])
+    setChatInput('')
+    setChatError('')
+  }, [selected])
+
+  async function sendChatQuestion() {
+    const question = chatInput.trim()
+    if (!selected || !question) return
+
+    const nextMessages = [...chatMessages, { role: 'user', content: question }]
+    setChatMessages(nextMessages)
+    setChatInput('')
+    setChatError('')
+    setChatLoading(true)
+
+    try {
+      const response = await axios.post('/api/ask', {
+        record_id: selected._id,
+        question,
+      })
+
+      setChatMessages([
+        ...nextMessages,
+        { role: 'assistant', content: response.data.answer || 'The AI did not return an answer.' },
+      ])
+    } catch (error) {
+      setChatError(error?.response?.data?.error || 'Failed to reach the AI service.')
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
   return (
     <div className="container">
       <aside className="sidebar panel">
         <h1 className="title">Wireless Diagnostics Assistant</h1>
-        <p className="subtitle">Wireless troubleshooting assistant for field diagnostics</p>
+        <p className="subtitle">FAE-style wireless troubleshooting dashboard</p>
 
         <div className="controls">
-          <select
-            className="control"
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-          >
+          <select className="control" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
             <option value="all">All locations</option>
             {locations.map((location) => (
-              <option key={location} value={location}>
-                {location}
-              </option>
+              <option key={location} value={location}>{location}</option>
             ))}
           </select>
 
-          <select
-            className="control"
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
-          >
+          <select className="control" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
             <option value="all">All severity</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
@@ -173,7 +339,7 @@ export default function App() {
 
         <input
           className="search"
-          placeholder="Search location / SSID / root cause"
+          placeholder="Search location / SSID / band / root cause"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -200,250 +366,335 @@ export default function App() {
                     {record.rule_diagnosis?.severity || 'normal'}
                   </span>
                 </div>
-
                 <div className="small">
-                  SSID: {record.wifi?.ssid || '-'} · Root cause:{' '}
+                  SSID: {record.wifi?.ssid || '-'} · {record.wifi?.band || '-'} · Root cause:{' '}
                   {record.root_cause?.root_cause_category || '-'}
                 </div>
               </div>
             ))}
-
             {!filtered.length && <div className="empty">No recent records found.</div>}
           </div>
         </div>
       </aside>
 
       <main className="main">
-        <div className="header-row">
+        <div className="header-row page-header">
           <div>
-            <h2 className="title" style={{ fontSize: 28, marginBottom: 4 }}>
-              Field Diagnostics Dashboard
-            </h2>
-            <p className="subtitle">
-              From raw measurements to anomaly detection, root cause, and AI explanation
-            </p>
+            <h2 className="title" style={{ fontSize: 28, marginBottom: 4 }}>Field Diagnostics Dashboard</h2>
+            <p className="subtitle">FAE view: performance, Wi-Fi link, connectivity, evidence, and AI explanation</p>
+          </div>
+
+          <div className="view-tabs">
+            <button
+              type="button"
+              className={`tab-button ${mainView === 'overview' ? 'active' : ''}`}
+              onClick={() => setMainView('overview')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              className={`tab-button ${mainView === 'notes' ? 'active' : ''}`}
+              onClick={() => setMainView('notes')}
+            >
+              AI & Engineering Notes
+            </button>
           </div>
         </div>
 
-        <div className="card-grid">
-          <div className="card">
-            <div className="metric-label">Avg Download</div>
-            <div className="metric-value">{stats.avgDownload} Mbps</div>
-          </div>
-          <div className="card">
-            <div className="metric-label">Avg Latency</div>
-            <div className="metric-value">{stats.avgLatency} ms</div>
-          </div>
-          <div className="card">
-            <div className="metric-label">Avg Signal</div>
-            <div className="metric-value">{stats.avgSignal}%</div>
-          </div>
-          <div className="card">
-            <div className="metric-label">Avg Health Score</div>
-            <div className="metric-value">{stats.avgHealth}</div>
-          </div>
-        </div>
-
-        {selected ? (
+        {mainView === 'overview' ? (
           <>
-            <div className="grid-two">
-              <div className="card">
-                <div className="header-row">
-                  <h3 className="section-title">Selected Measurement</h3>
-                  <span className={`badge ${severityClass(selected.rule_diagnosis?.severity)}`}>
-                    {selected.rule_diagnosis?.severity}
-                  </span>
-                </div>
-
-                <div className="detail-grid">
-                  <div className="detail-item">
-                    <div className="kv-label">Download</div>
-                    <div className="kv-value">{selected.speedtest?.download_mbps} Mbps</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="kv-label">Upload</div>
-                    <div className="kv-value">{selected.speedtest?.upload_mbps} Mbps</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="kv-label">Latency</div>
-                    <div className="kv-value">{selected.speedtest?.latency_ms} ms</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="kv-label">Jitter</div>
-                    <div className="kv-value">{selected.speedtest?.jitter_ms} ms</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="kv-label">Signal</div>
-                    <div className="kv-value">{selected.wifi?.signal_percent ?? '-'}%</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="kv-label">RSSI</div>
-                    <div className="kv-value">{selected.wifi?.rssi_dbm ?? '-'} dBm</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="header-row">
-                  <h3 className="section-title">FAE Decision Output</h3>
-                  <ShieldCheck size={18} />
-                </div>
-
-                <div className="detail-item" style={{ marginBottom: 12 }}>
-                  <div className="kv-label">Root Cause</div>
-                  <div className="kv-value" style={{ fontSize: 22 }}>
-                    {selected.root_cause?.root_cause_category || '-'}
-                  </div>
-                  <div className="small" style={{ marginTop: 8 }}>
-                    Confidence: {selected.root_cause?.confidence ?? '-'}
-                  </div>
-                </div>
-
-                <div className="detail-item">
-                  <div className="kv-label">Health Score</div>
-                  <div className="kv-value">{selected.rule_diagnosis?.health_score}</div>
-                </div>
-              </div>
+            <div className="card-grid">
+              <div className="card"><div className="metric-label">Avg Download</div><div className="metric-value">{stats.avgDownload} Mbps</div></div>
+              <div className="card"><div className="metric-label">Avg Upload</div><div className="metric-value">{stats.avgUpload} Mbps</div></div>
+              <div className="card"><div className="metric-label">Avg Latency</div><div className="metric-value">{stats.avgLatency} ms</div></div>
+              <div className="card"><div className="metric-label">Avg Jitter</div><div className="metric-value">{stats.avgJitter} ms</div></div>
+              <div className="card"><div className="metric-label">Packet Loss</div><div className="metric-value">{stats.avgPacketLoss}%</div></div>
+              <div className="card"><div className="metric-label">Avg Signal</div><div className="metric-value">{stats.avgSignal}%</div></div>
+              <div className="card"><div className="metric-label">Avg RSSI</div><div className="metric-value">{stats.avgRssi} dBm</div></div>
+              <div className="card"><div className="metric-label">Avg Health</div><div className="metric-value">{stats.avgHealth}</div></div>
             </div>
 
-            <div className="grid-two" style={{ marginTop: 16 }}>
-              <div className="card">
-                <div className="header-row">
-                  <h3 className="section-title">Trend: Download / Latency</h3>
-                  <Gauge size={18} />
+            {selected ? (
+              <>
+                <div className="grid-two">
+                  <div className="stack">
+                    <div className="card">
+                      <div className="header-row">
+                        <h3 className="section-title">Selected Measurement</h3>
+                        <span className={`badge ${severityClass(selected.rule_diagnosis?.severity)}`}>
+                          {selected.rule_diagnosis?.severity || 'normal'}
+                        </span>
+                      </div>
+                      <div className="small">{formatTime(selected.timestamp)} · {selected.location || '-'} · {selected.environment || '-'}</div>
+                    </div>
+
+                    <DetailSection title="Performance">
+                      <MetricItem label="Download" value={fmt(selected.speedtest?.download_mbps, ' Mbps')} />
+                      <MetricItem label="Upload" value={fmt(selected.speedtest?.upload_mbps, ' Mbps')} />
+                      <MetricItem label="Idle Latency" value={fmt(selected.speedtest?.latency_ms, ' ms')} />
+                      <MetricItem label="Jitter" value={fmt(selected.speedtest?.jitter_ms, ' ms')} />
+                      <MetricItem label="Packet Loss" value={fmt(selected.speedtest?.packet_loss, '%')} />
+                      <MetricItem label="Ping Avg / Loss" value={`${fmt(selected.ping?.avg_ms, ' ms')} / ${fmt(selected.ping?.packet_loss_percent, '% loss')}`} />
+                    </DetailSection>
+
+                    <DetailSection title="Wi-Fi Link">
+                      <MetricItem label="SSID" value={selected.wifi?.ssid || '-'} />
+                      <MetricItem label="Band" value={selected.wifi?.band || '-'} />
+                      <MetricItem label="Channel" value={selected.wifi?.channel || '-'} />
+                      <MetricItem label="Radio Type" value={selected.wifi?.radio_type || '-'} />
+                      <MetricItem label="Signal" value={fmt(selected.wifi?.signal_percent, '%', 0)} />
+                      <MetricItem label="RSSI" value={fmt(selected.wifi?.rssi_dbm, ' dBm', 0)} />
+                      <MetricItem label="Rx Rate" value={fmt(selected.wifi?.receive_rate_mbps, ' Mbps', 0)} />
+                      <MetricItem label="Tx Rate" value={fmt(selected.wifi?.transmit_rate_mbps, ' Mbps', 0)} />
+                      <MetricItem label="AP BSSID" value={selected.wifi?.ap_bssid || '-'} />
+                      <MetricItem label="Adapter" value={selected.wifi?.adapter || '-'} />
+                    </DetailSection>
+
+                    <DetailSection title="Connectivity">
+                      <MetricItem label="Ping Target" value={selected.ping?.target || '8.8.8.8'} />
+                      <MetricItem label="Ping Status" value={selected.ping?.status || '-'} />
+                      <MetricItem label="DNS Status" value={selected.dns?.status || '-'} />
+                      <MetricItem label="DNS Server" value={selected.dns?.dns_server_ip || selected.dns?.dns_server || '-'} />
+                      <MetricItem label="Resolved IP" value={(selected.dns?.resolved_ips || []).slice(0, 2).join(', ') || '-'} />
+                      <MetricItem label="Speedtest Server" value={selected.speedtest?.server_location || selected.speedtest?.server_name || '-'} />
+                    </DetailSection>
+                  </div>
+
+                  <div className="stack">
+                    <div className="card">
+                      <div className="header-row">
+                        <h3 className="section-title">FAE Decision Output</h3>
+                        <ShieldCheck size={18} />
+                      </div>
+
+                      <div className="detail-item" style={{ marginBottom: 12 }}>
+                        <div className="kv-label">Root Cause</div>
+                        <div className="kv-value" style={{ fontSize: 22 }}>{selected.root_cause?.root_cause_category || '-'}</div>
+                        <div className="small" style={{ marginTop: 8 }}>Confidence: {selected.root_cause?.confidence ?? '-'}</div>
+                      </div>
+
+                      <div className="detail-item" style={{ marginBottom: 12 }}>
+                        <div className="kv-label">Health Score</div>
+                        <div className="kv-value">{selected.rule_diagnosis?.health_score ?? '-'}</div>
+                      </div>
+
+                      <div className="metric-label">Evidence</div>
+                      <ul className="bullet-list">
+                        {evidence.length ? evidence.map((item, idx) => <li key={idx}>{item}</li>) : <li>No evidence available.</li>}
+                      </ul>
+                    </div>
+
+                    <div className="card">
+                      <div className="metric-label">Recommended Actions</div>
+                      <ul className="bullet-list">
+                        {(selected.recommendation_plan?.actions || []).map((item, idx) => (
+                          <li key={idx}>
+                            <strong>{item.action}</strong><br />
+                            <span className="small">{item.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="chart-wrap">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                      <XAxis dataKey="time" hide />
-                      <YAxis yAxisId="left" stroke="#8ca5c8" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#8ca5c8" />
-                      <Tooltip />
-                      <Line
-                        yAxisId="left"
-                        type="monotone"
-                        dataKey="download"
-                        stroke="#6fb6ff"
-                        strokeWidth={3}
-                        dot={false}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="latency"
-                        stroke="#ffc857"
-                        strokeWidth={3}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="grid-two" style={{ marginTop: 16 }}>
+                  <div className="card">
+                    <div className="header-row"><h3 className="section-title">Trend: Download / Latency</h3><Gauge size={18} /></div>
+                    <div className="chart-wrap">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          <CartesianGrid stroke="rgba(16, 40, 70, 0.12)" />
+                          <XAxis dataKey="time" hide />
+                          <YAxis yAxisId="left" stroke="#486581" />
+                          <YAxis yAxisId="right" orientation="right" stroke="#486581" />
+                          <Tooltip />
+                          <Line yAxisId="left" type="monotone" dataKey="download" stroke="#6fb6ff" strokeWidth={3} dot={false} />
+                          <Line yAxisId="right" type="monotone" dataKey="latency" stroke="#1c7ed6" strokeWidth={3} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="header-row"><h3 className="section-title">Signal vs Latency</h3><Activity size={18} /></div>
+                    <div className="chart-wrap">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart>
+                          <CartesianGrid stroke="rgba(16, 40, 70, 0.12)" />
+                          <XAxis dataKey="signal" name="Signal" unit="%" stroke="#486581" />
+                          <YAxis dataKey="latency" name="Latency" unit="ms" stroke="#486581" />
+                          <ZAxis dataKey="z" range={[80, 400]} />
+                          <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                          <Scatter data={scatterData}>
+                            {scatterData.map((entry, index) => {
+                              let color = '#6fb6ff'
+                              if (entry.severity === 'high') color = '#ff6b6b'
+                              else if (entry.severity === 'medium') color = '#ffc857'
+                              return <Cell key={`cell-${index}`} fill={color} />
+                            })}
+                          </Scatter>
+                        </ScatterChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div className="card">
-                <div className="header-row">
-                  <h3 className="section-title">Signal vs Latency</h3>
-                  <Activity size={18} />
-                </div>
-
-                <div className="chart-wrap">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart>
-                      <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                      <XAxis dataKey="signal" name="Signal" unit="%" stroke="#8ca5c8" />
-                      <YAxis dataKey="latency" name="Latency" unit="ms" stroke="#8ca5c8" />
-                      <ZAxis dataKey="z" range={[80, 400]} />
-                      <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                      <Scatter data={scatterData}>
-                      {scatterData.map((entry, index) => {
-                        let color = '#8bafff'
-
-                        if (entry.severity === 'high') color = '#ff6b6b'
-                        else if (entry.severity === 'medium') color = '#ffc857'
-                        else if (entry.severity === 'normal') color = '#6fb6ff'
-
-                        return <Cell key={`cell-${index}`} fill={color} />
-                      })}
-                    </Scatter>
-                    </ScatterChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
+              </>
+            ) : (
+              <div className="card">No recent data loaded.</div>
+            )}
           </>
         ) : (
-          <div className="card">No recent data loaded.</div>
-        )}
-      </main>
-
-      <aside className="rightbar panel">
-        <div className="header-row">
-          <h2 className="section-title">AI & Engineering Notes</h2>
-          <AlertTriangle size={18} />
-        </div>
-
-        {selected ? (
-          <div className="list" style={{ gap: 16 }}>
+          <div className="stack">
             <div className="card">
-              <div className="metric-label">AI Summary</div>
-              <div style={{ lineHeight: 1.5 }}>{selected.llm_diagnosis?.summary || '-'}</div>
-            </div>
-
-            <div className="card">
-              <div className="metric-label">Engineer Note</div>
-              <div style={{ lineHeight: 1.5 }}>
-                {selected.llm_diagnosis?.engineer_note || '-'}
+              <div className="header-row">
+                <div>
+                  <h3 className="section-title">AI & Engineering Notes</h3>
+                  <p className="subtitle" style={{ marginTop: 6 }}>Focused view for the selected record.</p>
+                </div>
+                <AlertTriangle size={18} />
               </div>
-            </div>
 
-            <div className="card">
-              <div className="metric-label">Customer Explanation</div>
-              <div style={{ lineHeight: 1.5 }}>
-                {selected.llm_diagnosis?.customer_friendly_explanation || '-'}
+              <div className="tabs">
+                <button
+                  type="button"
+                  className={`tab-button ${rightbarTab === 'ai' ? 'active' : ''}`}
+                  onClick={() => setRightbarTab('ai')}
+                >
+                  AI Notes
+                </button>
+                <button
+                  type="button"
+                  className={`tab-button ${rightbarTab === 'issues' ? 'active' : ''}`}
+                  onClick={() => setRightbarTab('issues')}
+                >
+                  Issues
+                </button>
+                <button
+                  type="button"
+                  className={`tab-button ${rightbarTab === 'logs' ? 'active' : ''}`}
+                  onClick={() => setRightbarTab('logs')}
+                >
+                  Logs
+                </button>
+                <button
+                  type="button"
+                  className={`tab-button ${rightbarTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setRightbarTab('chat')}
+                >
+                  Ask AI
+                </button>
               </div>
-            </div>
 
-            <div className="card">
-              <div className="metric-label">Detected Issues</div>
-              <ul className="bullet-list">
-                {(selected.rule_diagnosis?.issues || []).map((item, idx) => (
-                  <li key={idx}>{item}</li>
-                ))}
-              </ul>
-            </div>
+              {selected ? (
+                <div className="list" style={{ gap: 16 }}>
+                  {rightbarTab === 'ai' && (
+                    <div className="card">
+                      <div className="header-row">
+                        <h3 className="section-title">AI Analysis Report</h3>
+                        <Brain size={18} />
+                      </div>
 
-            <div className="card">
-              <div className="metric-label">Anomalies vs Baseline</div>
-              <ul className="bullet-list">
-                {(selected.baseline_analysis?.anomalies || []).length ? (
-                  selected.baseline_analysis.anomalies.map((item, idx) => (
-                    <li key={idx}>{item.message}</li>
-                  ))
-                ) : (
-                  <li>No anomaly detected.</li>
-                )}
-              </ul>
-            </div>
+                      <div className="ai-section">
+                        <div className="ai-section-header">
+                          <h4 className="ai-section-title">Executive Summary</h4>
+                        </div>
+                        <div className="small-text">{selected.llm_diagnosis?.summary || 'No summary available.'}</div>
+                      </div>
 
-            <div className="card">
-              <div className="metric-label">Recommended Actions</div>
-              <ul className="bullet-list">
-                {(selected.recommendation_plan?.actions || []).map((item, idx) => (
-                  <li key={idx}>
-                    <strong>{item.action}</strong>
-                    <br />
-                    <span className="small">{item.reason}</span>
-                  </li>
-                ))}
-              </ul>
+                      <div className="ai-section-divider"></div>
+
+                      <div className="ai-section">
+                        <div className="ai-section-header">
+                          <h4 className="ai-section-title">Customer Communication</h4>
+                        </div>
+                        {renderCustomerExplanation(selected.llm_diagnosis?.customer_friendly_explanation)}
+                      </div>
+
+                      <div className="ai-section-divider"></div>
+
+                      <div className="ai-section">
+                        <div className="ai-section-header">
+                          <h4 className="ai-section-title">Technical Analysis</h4>
+                        </div>
+                        {renderEngineerNote(selected.llm_diagnosis?.engineer_note)}
+                      </div>
+                    </div>
+                  )}
+
+                  {rightbarTab === 'issues' && (
+                    <>
+                      <div className="card">
+                        <div className="metric-label">Detected Issues</div>
+                        <ul className="bullet-list">
+                          {(selected.rule_diagnosis?.issues || []).length ? (
+                            selected.rule_diagnosis.issues.map((item, idx) => <li key={idx}>{item}</li>)
+                          ) : (
+                            <li>No issues detected.</li>
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="card">
+                        <div className="metric-label">Anomalies vs Baseline</div>
+                        <ul className="bullet-list">
+                          {(selected.baseline_analysis?.anomalies || []).length ? (
+                            selected.baseline_analysis.anomalies.map((item, idx) => <li key={idx}>{item.message}</li>)
+                          ) : (
+                            <li>No anomaly detected.</li>
+                          )}
+                        </ul>
+                      </div>
+                    </>
+                  )}
+
+                  {rightbarTab === 'logs' && <RawLogs selected={selected} />}
+
+                  {rightbarTab === 'chat' && (
+                    <div className="card chat-card">
+                      <div className="metric-label">LLM Assistant</div>
+                      <div className="chat-window">
+                        {chatMessages.length ? (
+                          chatMessages.map((msg, idx) => (
+                            <div key={idx} className={`chat-message ${msg.role}`}>
+                              <div className="chat-role">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
+                              <div>{msg.content}</div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="empty">Ask a question about the recent measurements to get help from the assistant.</div>
+                        )}
+                      </div>
+
+                      <textarea
+                        className="chat-input"
+                        rows={4}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="e.g. What trends do you see in the recent 10 measurements?"
+                      />
+
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={sendChatQuestion}
+                        disabled={chatLoading || !chatInput.trim()}
+                      >
+                        {chatLoading ? 'Asking AI...' : 'Ask AI'}
+                      </button>
+
+                      {chatError && <div className="error-text">{chatError}</div>}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="empty">Select a recent record to view AI and engineering notes.</div>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="empty">Select a recent record to view diagnosis details.</div>
         )}
-      </aside>
+      </main>
     </div>
   )
 }

@@ -5,7 +5,7 @@ import os
 import subprocess
 from typing import Any, Dict
 import requests
-from parsers import parse_wifi_info, parse_ping_info
+from parsers import parse_wifi_info, parse_ping_info, parse_nslookup_info
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:5000/api/records")
 
@@ -52,7 +52,68 @@ def collect_data(location: str = "unknown", environment: str = "unknown") -> Dic
             "nslookup_raw": nslookup_raw,
         },
     }
+def _safe_get_latency(section: dict) -> dict:
+    """
+    Ookla JSON sometimes includes loaded latency under:
+    download.latency / upload.latency.
+    If not available, return empty values.
+    """
+    latency = section.get("latency", {}) if isinstance(section, dict) else {}
+    return {
+        "latency_ms": latency.get("iqm"),
+        "jitter_ms": latency.get("jitter"),
+        "low_ms": latency.get("low"),
+        "high_ms": latency.get("high"),
+    }
 
+
+def collect_data(location: str = "unknown", environment: str = "unknown") -> Dict[str, Any]:
+    timestamp = datetime.datetime.now().isoformat()
+
+    speedtest_raw = run_command("speedtest --format=json")
+    wifi_raw = run_command("netsh wlan show interfaces")
+    ping_raw = run_command("ping 8.8.8.8 -n 10")
+    tracert_raw = run_command("tracert google.com")
+    nslookup_raw = run_command("nslookup google.com")
+
+    speedtest = json.loads(speedtest_raw)
+    wifi = parse_wifi_info(wifi_raw)
+    ping = parse_ping_info(ping_raw)
+    dns = parse_nslookup_info(nslookup_raw)
+
+    return {
+        "timestamp": timestamp,
+        "location": location,
+        "environment": environment,
+        "speedtest": {
+            "download_mbps": round(speedtest["download"]["bandwidth"] * 8 / 1_000_000, 2),
+            "upload_mbps": round(speedtest["upload"]["bandwidth"] * 8 / 1_000_000, 2),
+
+            # Idle latency from speedtest ping section
+            "latency_ms": speedtest["ping"]["latency"],
+            "jitter_ms": speedtest["ping"]["jitter"],
+            "packet_loss": speedtest.get("packetLoss", 0),
+
+            # Loaded latency, if Ookla JSON provides it
+            "download_latency": _safe_get_latency(speedtest.get("download", {})),
+            "upload_latency": _safe_get_latency(speedtest.get("upload", {})),
+
+            "isp": speedtest.get("isp"),
+            "server_name": speedtest["server"]["name"],
+            "server_location": speedtest["server"]["location"],
+            "result_url": speedtest["result"]["url"],
+        },
+        "wifi": wifi,
+        "ping": ping,
+        "dns": dns,
+        "raw_outputs": {
+            "speedtest_raw": speedtest_raw,
+            "wifi_raw": wifi_raw,
+            "ping_raw": ping_raw,
+            "tracert_raw": tracert_raw,
+            "nslookup_raw": nslookup_raw,
+        },
+    }
 
 def send_record(record: Dict[str, Any]) -> Dict[str, Any]:
     resp = requests.post(API_URL, json=record, timeout=120)

@@ -15,7 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from baseline import build_baseline, detect_anomalies
 from diagnosis import diagnose, classify_root_cause, build_recommendation_plan
-from llm_diagnosis import llm_diagnose
+from llm_diagnosis import llm_diagnose, ask_llm
 from collector_agent import collect_data
 
 
@@ -235,6 +235,32 @@ def get_summary() -> tuple:
 def get_locations() -> tuple:
     locations = sorted(v for v in collection.distinct("location") if v)
     return jsonify(locations), 200
+
+
+@app.post("/api/ask")
+def ask_record() -> tuple:
+    data = request.get_json(silent=True) or {}
+    record_id = data.get("record_id")
+    question = (data.get("question") or "").strip()
+
+    if not record_id or not question:
+        return jsonify({"error": "record_id and question are required."}), 400
+
+    try:
+        query_id = ObjectId(record_id) if ObjectId.is_valid(record_id) else record_id
+    except Exception:
+        query_id = record_id
+
+    # Get the recent 10 records for context
+    recent_records = list(collection.find().sort("timestamp", -1).limit(10))
+    if not recent_records:
+        return jsonify({"error": "No records found."}), 404
+
+    try:
+        answer = ask_llm(recent_records, question)
+        return jsonify({"answer": answer}), 200
+    except Exception as e:
+        return jsonify({"error": f"LLM request failed: {str(e)}"}), 500
 
 
 @app.get("/api/baseline/<location>")

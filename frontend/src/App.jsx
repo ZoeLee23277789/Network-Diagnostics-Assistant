@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import { Activity, AlertTriangle, Brain, Gauge, ShieldCheck } from 'lucide-react'
+import { Activity, AlertTriangle, BookOpen, Brain, Cloud, FileText, Gauge, Network, ShieldCheck, TerminalSquare } from 'lucide-react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -168,6 +168,219 @@ function RawLogs({ selected }) {
           <pre className="raw-pre">{raw[key] || 'No raw output available.'}</pre>
         </details>
       ))}
+    </div>
+  )
+}
+
+const automationSkills = [
+  {
+    title: 'Network diagnostics automation',
+    copy: 'Automate IP, gateway, DNS, internet reachability, traceroute, Wi-Fi signal, and throughput checks.',
+    icon: Network,
+  },
+  {
+    title: 'API / cloud endpoint testing',
+    copy: 'Validate device registration, telemetry upload, health endpoints, token access, and response latency.',
+    icon: Cloud,
+  },
+  {
+    title: 'Reporting and execution',
+    copy: 'Record the environment, produce PASS / FAIL reports, and prepare runs for schedules or CI/CD.',
+    icon: FileText,
+  },
+]
+
+const learningPath = [
+  'Introduction to Network Automation',
+  'Using APIs for Network Automation',
+  'Google IT Automation with Python',
+  'Apply API Testing & Automation with Postman',
+]
+
+const commandCatalog = [
+  'ipconfig /all',
+  'ping 8.8.8.8',
+  'ping google.com',
+  'tracert google.com',
+  'nslookup google.com',
+  'Test-NetConnection cloud.example.com -Port 443',
+  'Test-NetConnection mqtt.example.com -Port 8883',
+  'netsh wlan show interfaces',
+]
+
+function numberValue(value) {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = Number(String(value).replace('%', ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function buildValidationChecks(selected) {
+  if (!selected) return []
+
+  const signal = numberValue(selected.wifi?.signal_percent ?? selected.wifi?.signal)
+  const pingLoss = numberValue(selected.ping?.packet_loss_percent)
+  const pingLatency = numberValue(selected.ping?.avg_ms)
+  const dnsSuccess = selected.dns?.status === 'success' || (selected.dns?.resolved_ips || []).length > 0
+  const download = numberValue(selected.speedtest?.download_mbps)
+
+  return [
+    {
+      name: 'Wi-Fi link and signal',
+      status: signal === null ? 'pending' : signal >= 70 ? 'pass' : 'fail',
+      result: signal === null ? 'Signal not available in record' : `${signal}% signal strength`,
+      source: 'netsh wlan show interfaces',
+    },
+    {
+      name: 'Public internet reachability',
+      status: pingLoss === null ? 'pending' : pingLoss === 0 ? 'pass' : 'fail',
+      result: pingLoss === null ? 'Ping result not available' : `${pingLoss}% loss${pingLatency === null ? '' : `, ${pingLatency} ms avg`}`,
+      source: 'ping 8.8.8.8',
+    },
+    {
+      name: 'DNS resolution',
+      status: selected.dns ? (dnsSuccess ? 'pass' : 'fail') : 'pending',
+      result: selected.dns
+        ? dnsSuccess
+          ? (selected.dns.resolved_ips || []).slice(0, 2).join(', ')
+          : 'No resolved IP'
+        : 'Not collected in this record',
+      source: 'nslookup google.com',
+    },
+    {
+      name: 'Internet throughput',
+      status: download === null ? 'pending' : download >= 100 ? 'pass' : 'fail',
+      result: download === null ? 'Speedtest not available' : `${download} Mbps download`,
+      source: 'speedtest --format=json',
+    },
+    {
+      name: 'Cloud HTTPS endpoint',
+      status: 'planned',
+      result: 'Add configurable /health endpoint check',
+      source: 'requests.get() / TCP 443',
+    },
+    {
+      name: 'MQTT broker connectivity',
+      status: 'planned',
+      result: 'Add broker TLS reachability for device telemetry',
+      source: 'TCP 8883',
+    },
+  ]
+}
+
+function TestStatus({ status }) {
+  const labels = { pass: 'PASS', fail: 'FAIL', pending: 'PENDING', planned: 'PLANNED' }
+  return <span className={`test-status ${status}`}>{labels[status] || status}</span>
+}
+
+function AutomationLab({ selected }) {
+  const checks = buildValidationChecks(selected)
+  const passCount = checks.filter((check) => check.status === 'pass').length
+  const completedCount = checks.filter((check) => check.status === 'pass' || check.status === 'fail').length
+
+  return (
+    <div className="automation-layout">
+      <div className="card automation-hero">
+        <div>
+          <div className="automation-kicker">Portfolio Project</div>
+          <h3 className="automation-title">Automotive IoT Connectivity Test Automation Tool</h3>
+          <p className="small-text">
+            Automated network connectivity validation for an FAE workflow: collect evidence, verify device-to-cloud
+            connectivity, isolate failure points, and produce repeatable reports.
+          </p>
+        </div>
+        <div className="automation-summary">
+          <div className="summary-value">{passCount}/{completedCount || '-'}</div>
+          <div className="metric-label">Available checks passing</div>
+          <div className="small">{selected ? formatTime(selected.timestamp) : 'Select a measurement to evaluate'}</div>
+        </div>
+      </div>
+
+      <div className="automation-skill-grid">
+        {automationSkills.map(({ title, copy, icon: Icon }) => (
+          <div className="card skill-card" key={title}>
+            <Icon size={20} />
+            <h3 className="section-title">{title}</h3>
+            <p className="small-text">{copy}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid-two">
+        <div className="card">
+          <div className="header-row">
+            <div>
+              <h3 className="section-title">Automated Validation Suite</h3>
+              <p className="subtitle automation-caption">Current measurement plus IoT/cloud expansion coverage</p>
+            </div>
+            <ShieldCheck size={18} />
+          </div>
+
+          {selected ? (
+            <div className="test-list">
+              {checks.map((check) => (
+                <div className="test-row" key={check.name}>
+                  <div>
+                    <div className="test-name">{check.name}</div>
+                    <div className="small">{check.result}</div>
+                    <code className="inline-command">{check.source}</code>
+                  </div>
+                  <TestStatus status={check.status} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty">Select a measurement from the sidebar to build its validation report.</div>
+          )}
+        </div>
+
+        <div className="stack">
+          <div className="card">
+            <div className="header-row">
+              <h3 className="section-title">Windows Collection Commands</h3>
+              <TerminalSquare size={18} />
+            </div>
+            <div className="command-grid">
+              {commandCatalog.map((command) => <code className="command-item" key={command}>{command}</code>)}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="metric-label">Automotive IoT Extensions</div>
+            <div className="tag-row">
+              {['SIM / APN status', 'RSSI / RSRP / SINR', 'GPS fix', 'Device ID / IMEI / ICCID', 'Firmware version', 'Telemetry API'].map((item) => (
+                <span className="scope-tag" key={item}>{item}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-two">
+        <div className="card">
+          <div className="header-row">
+            <h3 className="section-title">Learning Roadmap</h3>
+            <BookOpen size={18} />
+          </div>
+          <p className="small-text automation-caption">
+            Build Python fundamentals first, then add network programmability and cloud/API automation.
+          </p>
+          <ol className="roadmap-list">
+            {learningPath.map((course) => <li key={course}>{course}</li>)}
+          </ol>
+        </div>
+
+        <div className="card">
+          <div className="header-row">
+            <h3 className="section-title">Report Output</h3>
+            <FileText size={18} />
+          </div>
+          <div className="report-schema">
+            {['PASS / FAIL status', 'Latency and packet loss', 'DNS and TCP port results', 'API response and latency', 'Probable root cause', 'Recommended next step'].map((field) => (
+              <div className="report-field" key={field}>{field}</div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -399,6 +612,13 @@ export default function App() {
             >
               AI & Engineering Notes
             </button>
+            <button
+              type="button"
+              className={`tab-button ${mainView === 'automation' ? 'active' : ''}`}
+              onClick={() => setMainView('automation')}
+            >
+              Automation Lab
+            </button>
           </div>
         </div>
 
@@ -545,7 +765,7 @@ export default function App() {
               <div className="card">No recent data loaded.</div>
             )}
           </>
-        ) : (
+        ) : mainView === 'notes' ? (
           <div className="stack">
             <div className="card">
               <div className="header-row">
@@ -693,6 +913,8 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : (
+          <AutomationLab selected={selected} />
         )}
       </main>
     </div>

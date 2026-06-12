@@ -277,6 +277,10 @@ select {
   margin-top: 14px;
 }
 
+.guide-section:first-child .note-heading {
+  margin-top: 0;
+}
+
 .raw-details {
   border-top: 1px solid #d9e2ec;
   padding: 12px 0;

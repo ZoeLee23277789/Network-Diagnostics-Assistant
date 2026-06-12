@@ -60,6 +60,61 @@ function DetailSection({ title, children }) {
   )
 }
 
+const diagnosticGuide = [
+  {
+    title: 'Throughput & Speed',
+    items: [
+      ['Download / upload speed', 'Checks whether the available bandwidth is sufficient for the customer use case.'],
+      ['Latency', 'Shows how responsive the connection is and whether users may experience lag.'],
+      ['Jitter', 'Measures connection stability, especially important for voice and video quality.'],
+      ['Packet loss', 'Indicates whether data is being dropped, which can cause disconnects, retries, or unstable sessions.'],
+    ],
+  },
+  {
+    title: 'Wi-Fi Link Quality',
+    items: [
+      ['SSID', 'Confirms which wireless network the device is connected to.'],
+      ['Band (2.4G / 5G)', 'Shows the tradeoff between coverage range and maximum speed.'],
+      ['Channel', 'Helps identify possible interference from nearby access points.'],
+      ['Signal % / RSSI', 'Shows signal strength in user-friendly and industry-standard units.'],
+      ['Link rate', 'Shows the negotiated maximum rate between the device and access point.'],
+    ],
+  },
+  {
+    title: 'Connectivity',
+    items: [
+      ['Ping', 'Verifies basic network reachability and is usually the first troubleshooting step.'],
+      ['DNS', 'Checks whether domain names can be resolved when the network is connected but websites or services still fail.'],
+    ],
+  },
+]
+
+function DiagnosticGuide() {
+  return (
+    <div className="card">
+      <div className="header-row">
+        <h3 className="section-title">Field Measurement Guide</h3>
+        <ShieldCheck size={18} />
+      </div>
+
+      <div className="note-block">
+        {diagnosticGuide.map((section) => (
+          <div className="guide-section" key={section.title}>
+            <div className="metric-label note-heading">{section.title}</div>
+            <ul className="bullet-list">
+              {section.items.map(([label, description]) => (
+                <li key={label}>
+                  <strong>{label}:</strong> {description}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function renderCustomerExplanation(explanation) {
   if (!explanation) return <div>-</div>
   if (typeof explanation === 'string') return <div className="small-text">{explanation}</div>
@@ -273,14 +328,6 @@ export default function App() {
     [filtered]
   )
 
-  const evidence = useMemo(() => {
-    if (!selected) return []
-    return [
-      ...(selected.rule_diagnosis?.evidence || []),
-      ...(selected.root_cause?.evidence || []),
-    ].slice(0, 8)
-  }, [selected])
-
   useEffect(() => {
     if (!selected) return
     setRightbarTab('ai')
@@ -320,7 +367,6 @@ export default function App() {
     <div className="container">
       <aside className="sidebar panel">
         <h1 className="title">Wireless Diagnostics Assistant</h1>
-        <p className="subtitle">FAE-style wireless troubleshooting dashboard</p>
 
         <div className="controls">
           <select className="control" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
@@ -382,7 +428,6 @@ export default function App() {
         <div className="header-row page-header">
           <div>
             <h2 className="title" style={{ fontSize: 28, marginBottom: 4 }}>Field Diagnostics Dashboard</h2>
-            <p className="subtitle">FAE view: performance, Wi-Fi link, connectivity, evidence, and AI explanation</p>
           </div>
 
           <div className="view-tabs">
@@ -472,40 +517,7 @@ export default function App() {
                   </div>
 
                   <div className="stack">
-                    <div className="card">
-                      <div className="header-row">
-                        <h3 className="section-title">FAE Decision Output</h3>
-                        <ShieldCheck size={18} />
-                      </div>
-
-                      <div className="detail-item" style={{ marginBottom: 12 }}>
-                        <div className="kv-label">Root Cause</div>
-                        <div className="kv-value" style={{ fontSize: 22 }}>{selected.root_cause?.root_cause_category || '-'}</div>
-                        <div className="small" style={{ marginTop: 8 }}>Confidence: {selected.root_cause?.confidence ?? '-'}</div>
-                      </div>
-
-                      <div className="detail-item" style={{ marginBottom: 12 }}>
-                        <div className="kv-label">Health Score</div>
-                        <div className="kv-value">{selected.rule_diagnosis?.health_score ?? '-'}</div>
-                      </div>
-
-                      <div className="metric-label">Evidence</div>
-                      <ul className="bullet-list">
-                        {evidence.length ? evidence.map((item, idx) => <li key={idx}>{item}</li>) : <li>No evidence available.</li>}
-                      </ul>
-                    </div>
-
-                    <div className="card">
-                      <div className="metric-label">Recommended Actions</div>
-                      <ul className="bullet-list">
-                        {(selected.recommendation_plan?.actions || []).map((item, idx) => (
-                          <li key={idx}>
-                            <strong>{item.action}</strong><br />
-                            <span className="small">{item.reason}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                    <DiagnosticGuide />
                   </div>
                 </div>
 
